@@ -1,0 +1,7 @@
+"""
+FastAPI application and routes
+"""
+
+
+
+
