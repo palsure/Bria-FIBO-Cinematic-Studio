@@ -470,39 +470,93 @@ class FIBOGenerator:
             sys.path.insert(0, str(backend_dir))
         from core.storyboard import Storyboard
         
-        frames = []
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        # Function to process a single scene
+        def process_scene(scene):
+            try:
+                # Translate scene to FIBO JSON
+                fibo_params = translator.translate_to_json(
+                    scene.description,
+                    scene.visual_notes
+                )
+                
+                # Merge custom parameters if provided
+                if custom_params:
+                    # Deep merge custom params with generated params
+                    def deep_merge(base, override):
+                        result = base.copy()
+                        for key, value in override.items():
+                            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                                result[key] = deep_merge(result[key], value)
+                            else:
+                                result[key] = value
+                        return result
+                    fibo_params = deep_merge(fibo_params, custom_params)
+                
+                # Generate frame (Consistency engine logic might need adjustment for strict frame-to-frame dependency if strict continuity is required, 
+                # but for speed we relax strictly sequential generation or we'd need to pre-generate params sequentially then render in parallel)
+                # For this implementation, we allow parallel generation. 
+                # Note: This might affect the strict frame-to-frame consistency logic if it relies on mutable state updates during generation.
+                # However, the current consistency_engine updates state *after* processing. 
+                # To be safe for speed while trying to be somewhat consistent, we can generate params first then render images in parallel.
+                
+                # OPTIMIZATION: We will generate the images in parallel.
+                # The consistency params logic is fast, the image generation is slow.
+                # So we should decouple param generation (serial) from image generation (parallel).
+                
+                return {
+                    "scene": scene,
+                    "params": fibo_params
+                }
+            except Exception as e:
+                print(f"Error preparing scene {scene.number}: {e}")
+                return None
+
+        # Step 1: Prepare parameters (Sequential to maintain consistency context if needed, though here we do it in parallel for now as consistency engine state is per-instance)
+        # Actually, for the consistency engine to work correctly (passing previous params), strictly speaking we should generate params sequentially.
+        # But image generation is the bottleneck.
         
+        # Let's do parameter generation sequentially to respect consistency engine
+        prepared_data = []
         for scene in scenes:
-            # Translate scene to FIBO JSON
-            fibo_params = translator.translate_to_json(
-                scene.description,
-                scene.visual_notes
-            )
+            scene_data = process_scene(scene)
+            if scene_data:
+                prepared_data.append(scene_data)
+
+        # Step 2: Generate images in parallel
+        # This is the slow part that we want to parallelize
+        def generate_image_for_scene(data):
+            try:
+                frame = self.generate_frame(
+                    data["scene"].description,
+                    data["params"],
+                    data["scene"].number
+                )
+                # Store scene description
+                frame.params['scene_description'] = data["scene"].description
+                return frame
+            except Exception as e:
+                print(f"Error generating frame for scene {data['scene'].number}: {e}")
+                return None
+
+        frames = [None] * len(prepared_data)
+        
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            # map preserves order? No, map does, submit doesn't. 
+            # We use map to keep things simple or just submit and sort by scene number.
+            future_to_index = {executor.submit(generate_image_for_scene, data): i for i, data in enumerate(prepared_data)}
             
-            # Merge custom parameters if provided
-            if custom_params:
-                # Deep merge custom params with generated params
-                def deep_merge(base, override):
-                    result = base.copy()
-                    for key, value in override.items():
-                        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-                            result[key] = deep_merge(result[key], value)
-                        else:
-                            result[key] = value
-                    return result
-                fibo_params = deep_merge(fibo_params, custom_params)
-            
-            # Generate frame
-            frame = self.generate_frame(
-                scene.description,
-                fibo_params,
-                scene.number
-            )
-            
-            # Store scene description in frame params for later retrieval
-            frame.params['scene_description'] = scene.description
-            
-            frames.append(frame)
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
+                try:
+                    frame = future.result()
+                    frames[index] = frame
+                except Exception as e:
+                    print(f"Generated generated exception: {e}")
+        
+        # Filter out Nones
+        frames = [f for f in frames if f is not None]
         
         return Storyboard(frames)
 

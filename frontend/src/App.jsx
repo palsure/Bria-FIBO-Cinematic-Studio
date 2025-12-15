@@ -2,6 +2,7 @@ import React, { useState } from 'react'
 import CreateStoryboard from './components/CreateStoryboard'
 import SavedStoryboards from './components/SavedStoryboards'
 import SavedScenes from './components/SavedScenes'
+import UsageGuide from './components/UsageGuide'
 import './App.css'
 
 function App() {
@@ -9,6 +10,7 @@ function App() {
   const [storyboard, setStoryboard] = useState(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [showGuide, setShowGuide] = useState(false)
 
   const handleStoryboardGenerated = (storyboardData) => {
     setStoryboard(storyboardData)
@@ -33,7 +35,17 @@ function App() {
   return (
     <div className="app">
       <header className="app-header">
-        <h1>🎬 FIBO Studio</h1>
+        <div className="header-content">
+          <h1>🎬 FIBO Studio</h1>
+          <button
+            className="help-button"
+            onClick={() => setShowGuide(true)}
+            aria-label="Open Usage Guide"
+            title="Usage Guide"
+          >
+            ❓ Guide
+          </button>
+        </div>
         <p>AI-Powered Cinematic Pre-Visualization Pipeline. Powered by Bria FIBO and JSON-Native Visual Generation</p>
       </header>
 
@@ -79,6 +91,11 @@ function App() {
           }} />
         )}
       </main>
+
+      <UsageGuide
+        isOpen={showGuide}
+        onClose={() => setShowGuide(false)}
+      />
     </div>
   )
 }
