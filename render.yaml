@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: fibo-backend
+    env: python
+    region: oregon
+    plan: free
+    buildCommand: cd backend && pip install -r requirements-production.txt
+    startCommand: cd backend && uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: USE_LOCAL_BRIA
+        value: false
+      - key: PYTHON_VERSION
+        value: 3.9.18
+    healthCheckPath: /api/health
+    autoDeploy: true
+

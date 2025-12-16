@@ -1,0 +1,32 @@
+# FastAPI and Server (Required)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+
+# Core Dependencies (Minimal - only what's needed)
+pillow>=10.0.0
+numpy>=1.24.0,<2.0.0  # Pin to NumPy 1.x for compatibility
+
+# Script Parsing (Required)
+python-docx>=1.0.0
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# Export Formats (Optional - only if exporting PDF/Video)
+reportlab>=4.0.0  # PDF export
+# opencv-python>=4.8.0  # Video export - too large, install only if needed
+imageio>=2.31.0  # Image I/O
+imageio-ffmpeg>=0.4.9  # Video encoding
+
+# Utilities (Required)
+pydantic>=2.0.0  # Data validation
+python-dotenv>=1.0.0  # Environment variables
+requests>=2.31.0  # HTTP client for BRIA API
+
+# Heavy dependencies removed for faster deployment:
+# - torch, transformers, diffusers (only needed for local models - not used in production)
+# - openai, anthropic (only if using LLM translation - optional)
+# - scipy, matplotlib (optional visualization features)
+# - pytest, httpx (testing - not needed in production)
+# - huggingface-hub, accelerate (only for local models)
+
