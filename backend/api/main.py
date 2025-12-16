@@ -56,7 +56,9 @@ def get_fibo_generator():
     global fibo_generator
     if fibo_generator is None:
         bria_api_token = os.getenv("BRIA_API_TOKEN")
-        use_local = os.getenv("USE_LOCAL_BRIA", "true").lower() == "true"
+        # Default to False for Vercel (local models too large for serverless)
+        # Set USE_LOCAL_BRIA=true explicitly if you want local models
+        use_local = os.getenv("USE_LOCAL_BRIA", "false").lower() == "true"
         try:
             fibo_generator = FIBOGenerator(
                 api_token=bria_api_token,

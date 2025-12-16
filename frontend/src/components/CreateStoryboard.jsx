@@ -3,7 +3,8 @@ import axios from 'axios'
 import StoryboardViewer from './StoryboardViewer'
 import './CreateStoryboard.css'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Use environment variable if set, otherwise use relative path (for Vercel) or localhost (for dev)
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
 // Sample script for pre-population
 const SAMPLE_SCRIPT = `FADE IN:

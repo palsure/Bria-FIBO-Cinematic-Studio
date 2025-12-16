@@ -481,102 +481,107 @@ class FIBOGenerator:
                 else:
                     result[key] = value
             return result
-        
-        def generate_frame_for_scene(scene):
-            """Generate a single frame for a scene (thread-safe)"""
-            # Translate scene to FIBO JSON
-            fibo_params = translator.translate_to_json(
-                scene.description,
-                scene.visual_notes
-            )
-            
-            # Merge custom parameters if provided
-            if custom_params:
-                fibo_params = deep_merge(fibo_params, custom_params)
-            
-            # For parallel processing, we'll skip consistency checking during generation
-            # and rebuild the history after all frames are complete
-            # This avoids race conditions with the shared consistency_engine
-            original_history = list(self.consistency_engine.frame_history)
-            
+
+        # Function to process a single scene and generate parameters
+        def process_scene(scene, previous_params=None):
             try:
-                # Temporarily clear history to avoid cross-thread interference
-                # We'll rebuild it after parallel generation completes
-                self.consistency_engine.frame_history = []
+                # Translate scene to FIBO JSON
+                fibo_params = translator.translate_to_json(
+                    scene.description,
+                    scene.visual_notes
+                )
                 
-                # Generate frame (without consistency checking for now)
-                # We'll apply consistency after all frames are generated
-                image = self._generate_with_fibo(scene.description, fibo_params)
+                # Merge custom parameters if provided
+                if custom_params:
+                    fibo_params = deep_merge(fibo_params, custom_params)
+                
+                # Apply consistency engine to maintain visual continuity
+                adjusted_params = self.consistency_engine.maintain_consistency(
+                    fibo_params, previous_params
+                )
+                
+                return {
+                    "scene": scene,
+                    "params": adjusted_params
+                }
+            except Exception as e:
+                print(f"Error preparing scene {scene.number}: {e}")
+                return None
+
+        # Step 1: Prepare parameters sequentially to maintain consistency
+        # This ensures visual continuity across frames
+        prepared_data = []
+        previous_params = None
+        for scene in scenes:
+            scene_data = process_scene(scene, previous_params)
+            if scene_data:
+                prepared_data.append(scene_data)
+                previous_params = scene_data["params"]
+                # Update consistency engine history
+                self.consistency_engine.frame_history.append(previous_params)
+
+        # Step 2: Generate images in parallel
+        # This is the slow part that we want to parallelize
+        def generate_image_for_scene(data):
+            try:
+                # Generate frame (consistency already applied in params)
+                # We need to bypass consistency checking in generate_frame since we already did it
+                image = self._generate_with_fibo(data["scene"].description, data["params"])
                 
                 # Generate HDR version if enabled
                 hdr_image = None
                 if self.hdr_enabled:
-                    hdr_image = self._generate_hdr(image, fibo_params)
+                    hdr_image = self._generate_hdr(image, data["params"])
                 
                 frame = Frame(
-                    scene_number=scene.number,
+                    scene_number=data["scene"].number,
                     image=image,
-                    params=fibo_params,
+                    params=data["params"],
                     hdr_image=hdr_image
                 )
                 
                 # Store scene description in frame params for later retrieval
-                frame.params['scene_description'] = scene.description
-                
+                frame.params['scene_description'] = data["scene"].description
                 return frame
-            finally:
-                # Restore original history
-                self.consistency_engine.frame_history = original_history
-        
-        # Use parallel processing for frame generation
+            except Exception as e:
+                print(f"Error generating frame for scene {data['scene'].number}: {e}")
+                # Create a placeholder frame on error
+                placeholder = Image.new('RGB', (self.image_width, self.image_height), color='#2a2a2a')
+                from PIL import ImageDraw, ImageFont
+                draw = ImageDraw.Draw(placeholder)
+                try:
+                    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
+                except:
+                    font = ImageFont.load_default()
+                draw.text((10, 10), f"Error: Scene {data['scene'].number}", fill='#ff0000', font=font)
+                return Frame(
+                    scene_number=data["scene"].number,
+                    image=placeholder,
+                    params={'error': str(e), 'scene_description': data["scene"].description}
+                )
+
+        # Use parallel processing for image generation
         # Limit concurrent requests to avoid overwhelming the API
-        max_workers = min(len(scenes), 5)  # Max 5 concurrent requests
+        max_workers = min(len(prepared_data), 5)  # Max 5 concurrent requests
+        frames = [None] * len(prepared_data)
         
-        frames = []
-        frame_dict = {}  # Store frames by scene number to maintain order
-        
-        # Use ThreadPoolExecutor for parallel processing
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all frame generation tasks
-            future_to_scene = {
-                executor.submit(generate_frame_for_scene, scene): scene.number 
-                for scene in scenes
+            future_to_index = {
+                executor.submit(generate_image_for_scene, data): i 
+                for i, data in enumerate(prepared_data)
             }
             
-            # Collect results as they complete
-            for future in as_completed(future_to_scene):
-                scene_number = future_to_scene[future]
+            for future in as_completed(future_to_index):
+                index = future_to_index[future]
                 try:
                     frame = future.result()
-                    frame_dict[scene_number] = frame
+                    frames[index] = frame
                 except Exception as e:
-                    print(f"Error generating frame for scene {scene_number}: {e}")
-                    # Create a placeholder frame on error
-                    placeholder = Image.new('RGB', (self.image_width, self.image_height), color='#2a2a2a')
-                    from PIL import ImageDraw
-                    draw = ImageDraw.Draw(placeholder)
-                    draw.text((10, 10), f"Error: Scene {scene_number}", fill='#ff0000')
-                    frame_dict[scene_number] = Frame(
-                        scene_number=scene_number,
-                        image=placeholder,
-                        params={'error': str(e), 'scene_description': scenes[scene_number - 1].description if scene_number <= len(scenes) else ''}
-                    )
+                    print(f"Exception generating frame: {e}")
+                    frames[index] = None
         
-        # Reconstruct frames in correct order
-        frames = [frame_dict[scene.number] for scene in scenes]
+        # Filter out Nones and ensure frames are in correct order
+        frames = [f for f in frames if f is not None]
         
-        # Apply consistency adjustments sequentially after parallel generation
-        # This ensures visual consistency across frames
-        adjusted_frames = []
-        for i, frame in enumerate(frames):
-            previous_params = adjusted_frames[-1].params if adjusted_frames else None
-            adjusted_params = self.consistency_engine.maintain_consistency(
-                frame.params, previous_params
-            )
-            frame.params = adjusted_params
-            adjusted_frames.append(frame)
-            # Update history for next frame
-            self.consistency_engine.frame_history.append(adjusted_params)
-        
-        return Storyboard(adjusted_frames)
+        return Storyboard(frames)
 
