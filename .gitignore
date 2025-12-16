@@ -109,3 +109,5 @@ coverage.xml
 *.backup
 *~
 
+/.idea/
+/.vercel/
