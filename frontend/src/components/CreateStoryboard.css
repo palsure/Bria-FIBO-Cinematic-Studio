@@ -74,7 +74,7 @@
 .step-panel {
   background: #1a1a1a;
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 0 1.5rem 1.5rem 1.5rem;
   animation: fadeIn 0.3s ease-in;
 }
 
@@ -237,11 +237,13 @@
 
 .step-actions {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-start;
+  align-items: center;
   gap: 1rem;
   margin-top: 1.5rem;
   padding-top: 1.5rem;
   border-top: 1px solid #333;
+  flex-wrap: wrap;
 }
 
 .generating-state {
@@ -303,32 +305,36 @@
 }
 
 .previous-button {
-  background: #2a2a2a;
+  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
   color: #fff;
-  border: 1px solid #444;
+  border: none;
+  box-shadow: 0 2px 4px rgba(107, 114, 128, 0.3);
 }
 
 .previous-button:hover {
-  background: #333;
-  border-color: #555;
+  background: linear-gradient(135deg, #4b5563 0%, #374151 100%);
+  box-shadow: 0 4px 8px rgba(107, 114, 128, 0.4);
+  transform: translateY(-2px);
 }
 
 .reset-button {
   padding: 12px 24px;
-  background: #2a2a2a;
-  border: 1px solid #444;
+  background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  border: none;
   border-radius: 8px;
   color: #fff;
   font-size: 16px;
   font-weight: 500;
   cursor: pointer;
   transition: all 0.2s;
-  width: 100%;
+  box-shadow: 0 2px 4px rgba(139, 92, 246, 0.3);
+  width: auto;
 }
 
 .reset-button:hover {
-  background: #333;
-  border-color: #555;
+  background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%);
+  box-shadow: 0 4px 8px rgba(139, 92, 246, 0.4);
+  transform: translateY(-2px);
 }
 
 .export-actions {

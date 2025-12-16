@@ -20,6 +20,7 @@ if __name__ == "__main__":
         "api.main:app",
         host="0.0.0.0",
         port=port,
-        reload=True  # Auto-reload on code changes
+        reload=True,  # Auto-reload on code changes
+        log_level="info"
     )
 
