@@ -4,8 +4,8 @@ import ParameterCustomization from './ParameterCustomization'
 import Notification from './Notification'
 import './StoryboardViewer.css'
 
-// Use environment variable if set, otherwise use relative path (for Vercel) or localhost (for dev)
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
+// Use environment variable if set, otherwise use Render backend (production) or localhost (dev)
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : 'https://fibo-backend-jb9q.onrender.com')
 
 function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExportPDF, onExportAnimatic, exportLoading, onStoryboardUpdate, isSavedStoryboard = false }) {
   const [saving, setSaving] = useState({})

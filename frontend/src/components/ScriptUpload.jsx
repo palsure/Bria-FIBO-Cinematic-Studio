@@ -3,8 +3,8 @@ import axios from 'axios'
 import ParameterCustomization from './ParameterCustomization'
 import './ScriptUpload.css'
 
-// Use environment variable if set, otherwise use relative path (for Vercel) or localhost (for dev)
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
+// Use environment variable if set, otherwise use Render backend (production) or localhost (dev)
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : 'https://fibo-backend-jb9q.onrender.com')
 
 // Sample script for pre-population
 const SAMPLE_SCRIPT = `FADE IN:

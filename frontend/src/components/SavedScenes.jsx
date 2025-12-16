@@ -6,8 +6,8 @@ import ParameterCustomization from './ParameterCustomization'
 import './SavedScenes.css'
 import './StoryboardViewer.css'
 
-// Use environment variable if set, otherwise use relative path (for Vercel) or localhost (for dev)
-const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
+// Use environment variable if set, otherwise use Render backend (production) or localhost (dev)
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : 'https://fibo-backend-jb9q.onrender.com')
 
 function SavedScenes({ onLoadScene }) {
   const [savedScenes, setSavedScenes] = useState([])

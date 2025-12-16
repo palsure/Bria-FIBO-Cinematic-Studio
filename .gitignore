@@ -39,6 +39,8 @@ ENV/
 .env.local
 .env.*.local
 *.env
+frontend/.env.local
+frontend/.env.production
 
 # IDE
 .vscode/
@@ -111,3 +113,5 @@ coverage.xml
 
 /.idea/
 /.vercel/
+.vercel
+.env*.local
