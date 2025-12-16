@@ -94,26 +94,10 @@ class BRIAAPIClient:
         if negative_prompt:
             payload["negative_prompt"] = negative_prompt
         
-        # Debug: Log the URL being called
-        print(f"\n🔍 BRIA API Call:")
-        print(f"   URL: {url}")
-        print(f"   Endpoint: /image/generate")
-        if model_id and model_id != "default":
-            print(f"   Model ID: {model_id}")
-        print(f"   Headers: {list(self.headers.keys())}")
-        
         try:
             response = requests.post(url, json=payload, headers=self.headers, timeout=30)
             response.raise_for_status()
             result = response.json()
-            
-            # Log response structure for debugging
-            if "image_url" in result:
-                print(f"   ✓ Sync response: image_url received")
-            elif "request_id" in result:
-                print(f"   ✓ Async response: request_id = {result.get('request_id')}")
-            elif "image" in result or "data" in result:
-                print(f"   ✓ Direct image data in response")
             
             return result
         except requests.exceptions.HTTPError as e:

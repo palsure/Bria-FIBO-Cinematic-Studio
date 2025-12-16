@@ -71,17 +71,13 @@ def get_fibo_generator():
     global fibo_generator
     if fibo_generator is None:
         bria_api_token = os.getenv("BRIA_API_TOKEN")
-        # Default to False for Vercel (local models too large for serverless)
-        # Set USE_LOCAL_BRIA=true explicitly if you want local models
-        use_local = os.getenv("USE_LOCAL_BRIA", "false").lower() == "true"
         try:
             from core.fibo_engine import FIBOGenerator
             fibo_generator = FIBOGenerator(
                 api_token=bria_api_token,
                 hdr_enabled=True,
                 image_width=1920,
-                image_height=1080,
-                use_local_model=use_local
+                image_height=1080
             )
         except Exception as e:
             print(f"Warning: Failed to initialize FIBO generator: {e}")
@@ -91,8 +87,7 @@ def get_fibo_generator():
                 api_token=None,
                 hdr_enabled=True,
                 image_width=1920,
-                image_height=1080,
-                use_local_model=False
+                image_height=1080
             )
     return fibo_generator
 
@@ -347,11 +342,19 @@ async def export_pdf(request: ExportPDFRequest):
                     image_data = frame_data.get("image", "")
                     scene_number = frame_data.get("scene_number", 0)
                     params = frame_data.get("params", {})
+                    # Check if description is directly in frame_data (fallback)
+                    if "description" in frame_data and "scene_description" not in params:
+                        params = params.copy() if params else {}
+                        params["scene_description"] = frame_data.get("description")
                 else:
                     # If it's a FrameResponse object, convert to dict
                     image_data = frame_data.image if hasattr(frame_data, 'image') else ""
                     scene_number = frame_data.scene_number if hasattr(frame_data, 'scene_number') else 0
                     params = frame_data.params if hasattr(frame_data, 'params') else {}
+                    # Check if description is directly in frame_data (fallback)
+                    if hasattr(frame_data, 'description') and "scene_description" not in params:
+                        params = params.copy() if params else {}
+                        params["scene_description"] = frame_data.description
                 
                 if not image_data:
                     continue

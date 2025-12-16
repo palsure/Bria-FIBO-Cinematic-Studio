@@ -6,7 +6,6 @@
 Set these in Vercel Project Settings → Environment Variables:
 
 - ✅ `BRIA_API_TOKEN` - Your BRIA API token (REQUIRED)
-- ✅ `USE_LOCAL_BRIA` - Set to `false` (local models disabled for serverless)
 - ✅ `PYTHON_VERSION` - Optional, defaults to 3.9
 
 ### 2. Verify Files Are Present
@@ -124,7 +123,7 @@ curl http://localhost:8000/api/health
 
 ## Notes
 
-- Local BRIA models are disabled (too large for serverless)
+- BRIA API token-based implementation only (local models removed)
 - Heavy ML dependencies are excluded from `api/requirements.txt`
 - File storage is ephemeral - saved scenes/storyboards won't persist across deployments
 - Consider using external storage (S3, etc.) for production

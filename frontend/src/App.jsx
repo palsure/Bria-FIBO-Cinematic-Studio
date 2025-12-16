@@ -87,7 +87,6 @@ function App() {
         {activeTab === 'scenes' && (
           <SavedScenes onLoadScene={(scene) => {
             // Could navigate to create tab and show scene, or just show in a modal
-            console.log('Scene loaded:', scene)
           }} />
         )}
       </main>

@@ -49,7 +49,6 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
       const isSaved = !!(loadedStoryboard.id || loadedStoryboard.storyboard_id || loadedStoryboard.name)
       
       if (isSaved) {
-        console.log('CreateStoryboard: Loading saved storyboard (has id/name), setting isSavedStoryboard=true', loadedStoryboard)
         setStoryboard(loadedStoryboard)
         setIsSavedStoryboard(true)
         setCurrentStep(2) // Move to generation step
@@ -59,16 +58,13 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
         }
       } else {
         // This is a newly generated storyboard, not a saved one
-        console.log('CreateStoryboard: Newly generated storyboard (no id), setting isSavedStoryboard=false', loadedStoryboard)
         setStoryboard(loadedStoryboard)
         setIsSavedStoryboard(false)
         setCurrentStep(2) // Move to generation step
       }
     } else {
       // Explicitly set to false when no loaded storyboard OR when loadedStoryboard is cleared
-      // Only log if we're actually clearing (not on initial mount)
       if (loadedStoryboard === null || loadedStoryboard === undefined) {
-        console.log('CreateStoryboard: No loaded storyboard, ensuring isSavedStoryboard=false')
         setIsSavedStoryboard(false)
       }
     }
@@ -141,7 +137,6 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
     try {
       setLoading(true)
       setError(null)
-      console.log('CreateStoryboard: Auto-generating storyboard, setting isSavedStoryboard=false')
       setIsSavedStoryboard(false) // Ensure it's not marked as saved for new generation
       
       const payload = {
@@ -155,8 +150,6 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
       }
       
       const response = await axios.post(`${API_BASE_URL}/api/generate-storyboard`, payload)
-
-      console.log('CreateStoryboard: Storyboard generated, explicitly setting isSavedStoryboard=false')
       // CRITICAL: Set to false BEFORE setting storyboard to prevent useEffect from interfering
       setIsSavedStoryboard(false)
       // Use setTimeout to ensure state update happens before storyboard is set
@@ -185,7 +178,6 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
     try {
       setLoading(true)
       setError(null)
-      console.log('CreateStoryboard: Generating storyboard, setting isSavedStoryboard=false')
       setIsSavedStoryboard(false) // Ensure it's not marked as saved for new generation
       
       const payload = {
@@ -199,9 +191,6 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
       }
       
       const response = await axios.post(`${API_BASE_URL}/api/generate-storyboard`, payload)
-
-      console.log('CreateStoryboard: Storyboard generated (manual), explicitly setting isSavedStoryboard=false')
-      console.log('CreateStoryboard: Response data:', response.data)
       // CRITICAL: Set to false and clear any loaded storyboard reference
       // Also ensure the response data doesn't have id/name that would make it look saved
       const storyboardData = { ...response.data }
@@ -401,7 +390,6 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
                   storyboard={storyboard}
                   parsedScenes={parsedScenes}
                   onSaveStoryboard={(data) => {
-                    console.log('Storyboard saved:', data)
                   }}
                   onExportPDF={handleExportPDF}
                   onExportAnimatic={handleExportAnimatic}
@@ -414,12 +402,6 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
                   }}
                   isSavedStoryboard={isSavedStoryboard}
                 />
-                {/* Debug: Show current state */}
-                {process.env.NODE_ENV === 'development' && (
-                  <div style={{ padding: '10px', background: '#2a2a2a', marginTop: '10px', fontSize: '12px', color: '#888' }}>
-                    Debug: isSavedStoryboard={String(isSavedStoryboard)}
-                  </div>
-                )}
 
                 <div className="step-actions">
                   <button onClick={handlePrevious} className="previous-button">

@@ -12,24 +12,6 @@ import base64
 from io import BytesIO
 from .bria_client import BRIAAPIClient
 
-# Lazy import of local model to avoid blocking startup
-BRIA_LOCAL_AVAILABLE = False
-BRIALocalClient = None
-try:
-    from .bria_local import BRIALocalClient as _BRIALocalClient, BRIA_LOCAL_AVAILABLE as _BRIA_LOCAL_AVAILABLE
-    BRIALocalClient = _BRIALocalClient
-    BRIA_LOCAL_AVAILABLE = _BRIA_LOCAL_AVAILABLE
-except Exception as e:
-    # Silently fail - local model not available
-    pass
-
-# Optional torch import (not required for BRIA API usage)
-try:
-    import torch
-    TORCH_AVAILABLE = True
-except ImportError:
-    TORCH_AVAILABLE = False
-
 
 @dataclass
 class Frame:
@@ -179,53 +161,33 @@ class FIBOGenerator:
     def __init__(self, api_token: Optional[str] = None,
                  hdr_enabled: bool = True,
                  image_width: int = 1920,
-                 image_height: int = 1080,
-                 use_local_model: bool = True):
+                 image_height: int = 1080):
         """
-        Initialize FIBO generator with BRIA model
+        Initialize FIBO generator with BRIA API
         
         Args:
-            api_token: BRIA API token (optional, for API mode)
+            api_token: BRIA API token (required for image generation)
             hdr_enabled: Enable HDR/16-bit output
             image_width: Generated image width (default: 1920)
             image_height: Generated image height (default: 1080)
-            use_local_model: Use local BRIA-4B-Adapt model (default: True)
         """
         self.hdr_enabled = hdr_enabled
         self.image_width = image_width
         self.image_height = image_height
         self.consistency_engine = ConsistencyEngine()
-        self.use_local_model = use_local_model
         
-        # Initialize BRIA client (local model or API)
+        # Initialize BRIA API client
         self.bria_client = None
-        self.bria_local_client = None
-        
-        local_model_loaded = False
-        if use_local_model and BRIA_LOCAL_AVAILABLE and BRIALocalClient:
-            try:
-                print("🔄 Attempting to use local BRIA-4B-Adapt model...")
-                self.bria_local_client = BRIALocalClient()
-                print("✅ Local BRIA model initialized")
-                local_model_loaded = True
-            except Exception as e:
-                print(f"⚠️  Failed to load local model: {e}")
-                print("🔄 Falling back to API mode...")
-                self.bria_local_client = None
-                local_model_loaded = False
-        
-        # Initialize BRIA API client if local model not available or failed
-        if not local_model_loaded:
-            try:
-                if api_token:
-                    self.bria_client = BRIAAPIClient(api_token=api_token)
-                    print("✅ BRIA API client initialized")
-                else:
-                    print("⚠️  No BRIA API token provided. Using placeholder mode.")
-                    self.bria_client = None
-            except Exception as e:
-                print(f"Warning: Failed to initialize BRIA API client: {e}. Using placeholder mode.")
+        try:
+            if api_token:
+                self.bria_client = BRIAAPIClient(api_token=api_token)
+                print("✅ BRIA API client initialized")
+            else:
+                print("⚠️  No BRIA API token provided. Using placeholder mode.")
                 self.bria_client = None
+        except Exception as e:
+            print(f"Warning: Failed to initialize BRIA API client: {e}. Using placeholder mode.")
+            self.bria_client = None
     
     def generate_frame(self, scene_description: str, 
                       fibo_params: Dict, 
@@ -250,9 +212,7 @@ class FIBOGenerator:
             fibo_params, previous_params
         )
         
-        # Generate image using FIBO
-        # TODO: Implement actual FIBO generation
-        # This is a placeholder structure
+        # Generate image using FIBO via BRIA API
         image = self._generate_with_fibo(scene_description, adjusted_params)
         
         # Generate HDR version if enabled
@@ -278,10 +238,10 @@ class FIBOGenerator:
         Returns:
             Generated PIL Image
         """
-        # Check if we have any BRIA client available
-        if not self.bria_local_client and not self.bria_client:
+        # Check if BRIA API client is available
+        if not self.bria_client:
             # Fallback to placeholder if no BRIA client available
-            print("Warning: BRIA not configured. Using placeholder image.")
+            print("Warning: BRIA API not configured. Using placeholder image.")
             placeholder = Image.new('RGB', (self.image_width, self.image_height), color='#2a2a2a')
             from PIL import ImageDraw, ImageFont
             draw = ImageDraw.Draw(placeholder)
@@ -289,7 +249,7 @@ class FIBOGenerator:
                 font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 20)
             except:
                 font = ImageFont.load_default()
-            text = "BRIA Not Configured"
+            text = "BRIA API Not Configured"
             bbox = draw.textbbox((0, 0), text, font=font)
             x = (self.image_width - (bbox[2] - bbox[0])) // 2
             y = (self.image_height - (bbox[3] - bbox[1])) // 2
@@ -297,44 +257,25 @@ class FIBOGenerator:
             return placeholder
         
         # Build enhanced prompt from description and FIBO parameters
-        if self.bria_local_client:
-            prompt = self.bria_local_client.build_fibo_prompt(description, params)
-        elif self.bria_client:
-            prompt = self.bria_client.build_fibo_prompt(description, params)
-        else:
-            prompt = description  # Fallback
+        prompt = self.bria_client.build_fibo_prompt(description, params)
         
         # Build negative prompt from parameters
         negative_prompt = self._build_negative_prompt(params)
         
         try:
-            # Generate image using local model or API
-            if self.bria_local_client:
-                # Use local BRIA-4B-Adapt model
-                image = self.bria_local_client.generate_image(
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    width=self.image_width,
-                    height=self.image_height,
-                    num_inference_steps=50,
-                    guidance_scale=5.0
-                )
-            elif self.bria_client:
-                # Use BRIA API
-                model_id = os.getenv("BRIA_MODEL_ID")
-                kwargs = {}
-                if model_id:
-                    kwargs["model_id"] = model_id
-                
-                image = self.bria_client.generate_image_sync(
-                    prompt=prompt,
-                    negative_prompt=negative_prompt,
-                    width=self.image_width,
-                    height=self.image_height,
-                    **kwargs
-                )
-            else:
-                raise Exception("No BRIA client available (neither local nor API)")
+            # Generate image using BRIA API
+            model_id = os.getenv("BRIA_MODEL_ID")
+            kwargs = {}
+            if model_id:
+                kwargs["model_id"] = model_id
+            
+            image = self.bria_client.generate_image_sync(
+                prompt=prompt,
+                negative_prompt=negative_prompt,
+                width=self.image_width,
+                height=self.image_height,
+                **kwargs
+            )
             
             return image
         except Exception as e:

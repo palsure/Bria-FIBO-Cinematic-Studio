@@ -266,7 +266,7 @@ This is a hackathon project. Contributions and feedback welcome!
 
 ## 📄 License
 
-[Specify your license]
+MIT License.
 
 ## 🔗 Resources
 
@@ -277,4 +277,4 @@ This is a hackathon project. Contributions and feedback welcome!
 
 ## 📧 Contact
 
-[Your contact information]
+Suresh Kumar Palus & Partha Samal

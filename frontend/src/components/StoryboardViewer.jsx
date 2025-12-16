@@ -23,9 +23,7 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
 
   // Initialize saved storyboard info if it's a saved storyboard
   useEffect(() => {
-    console.log('StoryboardViewer useEffect: isSavedStoryboard=', isSavedStoryboard, 'storyboard exists?', !!storyboard)
     if (isSavedStoryboard === true && storyboard) {
-      console.log('StoryboardViewer: Setting saved storyboard info')
       // Check if storyboard has name and id from saved data
       if (storyboard.name) {
         setSavedStoryboardName(storyboard.name)
@@ -35,7 +33,6 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
       }
     } else {
       // Clear saved name when it's a new storyboard (or undefined/false)
-      console.log('StoryboardViewer: Clearing saved storyboard info (new storyboard)')
       setSavedStoryboardName(null)
       setSavedStoryboardId(null)
       setEditingStoryboardName(false)
@@ -45,18 +42,6 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
   if (!storyboard || !storyboard.frames) {
     return null
   }
-
-  // Debug logging - ALWAYS log to help debug
-  console.log('=== StoryboardViewer RENDER DEBUG ===')
-  console.log('isSavedStoryboard:', isSavedStoryboard, 'type:', typeof isSavedStoryboard, '=== true?', isSavedStoryboard === true)
-  console.log('savedStoryboardName:', savedStoryboardName)
-  console.log('editingStoryboardName:', editingStoryboardName)
-  console.log('storyboardName:', storyboardName)
-  console.log('Will show save controls?', isSavedStoryboard !== true)
-  console.log('Will show saved name?', isSavedStoryboard === true && savedStoryboardName)
-  console.log('Condition check: isSavedStoryboard === true?', isSavedStoryboard === true)
-  console.log('Will render save button in else branch?', isSavedStoryboard !== true)
-  console.log('=====================================')
 
   // Helper function to get scene description
   const getSceneDescription = (sceneNumber) => {

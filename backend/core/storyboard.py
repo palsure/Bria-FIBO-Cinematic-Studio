@@ -28,6 +28,7 @@ class Storyboard:
             from reportlab.platypus import SimpleDocTemplate, Image as RLImage, Spacer, Paragraph, PageBreak
             from reportlab.lib.styles import getSampleStyleSheet
             from reportlab.lib.enums import TA_CENTER
+            from reportlab.lib import colors
             from io import BytesIO
             
             doc = SimpleDocTemplate(output_path, pagesize=A4)
@@ -37,6 +38,13 @@ class Storyboard:
             # Create custom style for scene numbers
             scene_style = styles['Heading2']
             scene_style.alignment = TA_CENTER
+            
+            # Create custom style for scene descriptions
+            desc_style = styles['Normal']
+            desc_style.fontSize = 10
+            desc_style.leading = 12
+            desc_style.alignment = TA_CENTER
+            desc_style.textColor = colors.HexColor('#333333')
             
             # Layout: 2 frames per page
             frames_per_page = 2
@@ -50,6 +58,15 @@ class Storyboard:
                 scene_text = f"Scene {frame.scene_number}"
                 story.append(Paragraph(scene_text, scene_style))
                 story.append(Spacer(1, 0.1*inch))
+                
+                # Add scene description if available
+                scene_description = frame.params.get('scene_description', '')
+                if scene_description:
+                    # Clean up the description text
+                    desc_text = str(scene_description).strip()
+                    if desc_text:
+                        story.append(Paragraph(desc_text, desc_style))
+                        story.append(Spacer(1, 0.15*inch))
                 
                 # Add frame image
                 img_buffer = BytesIO()
