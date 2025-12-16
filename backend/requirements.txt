@@ -2,6 +2,7 @@
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
+mangum>=0.17.0  # ASGI adapter for Vercel serverless functions
 
 # Core Dependencies
 torch>=2.0.0
