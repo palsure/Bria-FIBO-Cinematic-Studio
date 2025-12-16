@@ -27,6 +27,7 @@ imageio-ffmpeg>=0.4.9  # Video encoding
 pydantic>=2.0.0  # Data validation
 python-dotenv>=1.0.0  # Environment variables
 requests>=2.31.0  # HTTP client for BRIA API
+typing-extensions==4.5.0  # Pin to avoid issubclass() error in Vercel
 
 # Optional: For advanced features (Commented out to reduce size)
 # scipy>=1.11.0  # Interpolation

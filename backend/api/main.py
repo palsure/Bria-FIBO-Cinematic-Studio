@@ -17,16 +17,15 @@ from pathlib import Path
 import sys
 from io import BytesIO
 import base64
-from PIL import Image
+# PIL Image imported lazily when needed to speed up startup
 
 # Add backend directory to path for imports
 backend_dir = Path(__file__).parent.parent
 if str(backend_dir) not in sys.path:
     sys.path.insert(0, str(backend_dir))
 
-from core.script_parser import ScriptProcessor
-from core.llm_translator import LLMTranslator
-from core.fibo_engine import FIBOGenerator
+# Lazy imports - don't import heavy modules at startup
+# This significantly speeds up application startup time
 
 app = FastAPI(
     title="FIBO Studio API",
@@ -43,9 +42,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services
-script_processor = ScriptProcessor()
-llm_translator = LLMTranslator(provider="bria")  # Default to BRIA/FIBO rule-based
+# Lazy initialization of services - only create when needed
+# This prevents blocking server startup
+_script_processor = None
+_llm_translator = None
+
+def get_script_processor():
+    """Lazy initialization of script processor"""
+    global _script_processor
+    if _script_processor is None:
+        from core.script_parser import ScriptProcessor
+        _script_processor = ScriptProcessor()
+    return _script_processor
+
+def get_llm_translator(provider="bria"):
+    """Lazy initialization of LLM translator"""
+    # Always create new instance if provider changes
+    # This allows different providers per request
+    from core.llm_translator import LLMTranslator
+    return LLMTranslator(provider=provider)
 
 # Initialize FIBO generator lazily (only when needed)
 # This prevents blocking server startup if model loading takes time
@@ -60,6 +75,7 @@ def get_fibo_generator():
         # Set USE_LOCAL_BRIA=true explicitly if you want local models
         use_local = os.getenv("USE_LOCAL_BRIA", "false").lower() == "true"
         try:
+            from core.fibo_engine import FIBOGenerator
             fibo_generator = FIBOGenerator(
                 api_token=bria_api_token,
                 hdr_enabled=True,
@@ -70,6 +86,7 @@ def get_fibo_generator():
         except Exception as e:
             print(f"Warning: Failed to initialize FIBO generator: {e}")
             # Create a minimal generator that will use placeholder mode
+            from core.fibo_engine import FIBOGenerator
             fibo_generator = FIBOGenerator(
                 api_token=None,
                 hdr_enabled=True,
@@ -79,9 +96,30 @@ def get_fibo_generator():
             )
     return fibo_generator
 
-# Output directory
-OUTPUT_DIR = Path("./outputs")
-OUTPUT_DIR.mkdir(exist_ok=True)
+# Output directory - lazy initialization for faster startup
+_OUTPUT_DIR = None
+
+def get_output_dir():
+    """Get output directory, creating it if needed"""
+    global _OUTPUT_DIR
+    if _OUTPUT_DIR is None:
+        # Try local directory first, fallback to /tmp
+        output_dir = Path("./outputs")
+        try:
+            output_dir.mkdir(parents=True, exist_ok=True)
+            # Quick write test
+            test_file = output_dir / ".write_test"
+            test_file.touch()
+            test_file.unlink()
+            _OUTPUT_DIR = output_dir
+        except (OSError, PermissionError):
+            # Fallback to /tmp
+            _OUTPUT_DIR = Path("/tmp/outputs")
+            _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    return _OUTPUT_DIR
+
+# For backward compatibility, create OUTPUT_DIR variable
+OUTPUT_DIR = get_output_dir()
 
 
 # Request/Response Models
@@ -167,6 +205,7 @@ async def parse_script(request: ScriptParseRequest):
         List of parsed scenes
     """
     try:
+        script_processor = get_script_processor()
         scenes = script_processor.parse_script_content(request.content)
         
         return [
@@ -201,6 +240,7 @@ async def upload_script(file: UploadFile = File(...)):
             tmp_path = tmp_file.name
         
         # Parse script
+        script_processor = get_script_processor()
         scenes = script_processor.parse_script(tmp_path)
         
         # Clean up
@@ -233,13 +273,14 @@ async def generate_storyboard(request: GenerateRequest):
     """
     try:
         # Parse script
+        script_processor = get_script_processor()
         scenes = script_processor.parse_script_content(request.script_content)
         
         if not scenes:
             raise HTTPException(status_code=400, detail="No scenes found in script")
         
         # Initialize translator with specified provider
-        translator = LLMTranslator(provider=request.llm_provider)
+        translator = get_llm_translator(provider=request.llm_provider)
         
         # Generate storyboard with custom parameters if provided
         generator = get_fibo_generator()
@@ -345,8 +386,9 @@ async def export_pdf(request: ExportPDFRequest):
             if not script_content:
                 raise HTTPException(status_code=400, detail="Either frames or script_content must be provided")
             
+            script_processor = get_script_processor()
             scenes = script_processor.parse_script_content(script_content)
-            translator = LLMTranslator(provider=llm_provider or "bria")
+            translator = get_llm_translator(provider=llm_provider or "bria")
             generator = get_fibo_generator()
             
             # Generate storyboard with custom parameters if provided
@@ -356,7 +398,7 @@ async def export_pdf(request: ExportPDFRequest):
                 storyboard = generator.create_storyboard(scenes, translator)
         
         # Export PDF
-        pdf_path = OUTPUT_DIR / "storyboard.pdf"
+        pdf_path = get_output_dir() / "storyboard.pdf"
         result = storyboard.export_pdf(str(pdf_path))
         
         # Check if PDF was created successfully
@@ -394,8 +436,9 @@ async def export_animatic(request: GenerateRequest, duration: float = 3.0):
     """
     try:
         # Generate storyboard
+        script_processor = get_script_processor()
         scenes = script_processor.parse_script_content(request.script_content)
-        translator = LLMTranslator(provider=request.llm_provider)
+        translator = get_llm_translator(provider=request.llm_provider)
         generator = get_fibo_generator()
         
         # Generate storyboard with custom parameters if provided
@@ -405,7 +448,7 @@ async def export_animatic(request: GenerateRequest, duration: float = 3.0):
             storyboard = generator.create_storyboard(scenes, translator)
         
         # Export animatic
-        video_path = OUTPUT_DIR / "animatic.mp4"
+        video_path = get_output_dir() / "animatic.mp4"
         storyboard.export_animatic(str(video_path), duration_per_frame=duration)
         
         # Check if video was created successfully
@@ -560,15 +603,17 @@ async def generate_ai_animatic(request: GenerateRequest, duration: float = 3.0):
         from core.bria_client import BRIAAPIClient
         
         # Generate storyboard first
+        script_processor = get_script_processor()
         scenes = script_processor.parse_script_content(request.script_content)
-        translator = LLMTranslator(provider=request.llm_provider)
-        storyboard = fibo_generator.create_storyboard(scenes, translator)
+        translator = get_llm_translator(provider=request.llm_provider)
+        generator = get_fibo_generator()
+        storyboard = generator.create_storyboard(scenes, translator)
         
         # Initialize BRIA client
         bria_client = BRIAAPIClient(api_token=os.getenv("BRIA_API_TOKEN"))
         
         # Generate AI animatic
-        video_path = OUTPUT_DIR / "ai_animatic.mp4"
+        video_path = get_output_dir() / "ai_animatic.mp4"
         storyboard.generate_ai_animatic(bria_client, str(video_path), duration)
         
         return FileResponse(
@@ -658,8 +703,13 @@ async def save_scene(request: SaveSceneRequest):
     """
     try:
         # Create saved scenes directory
-        saved_dir = OUTPUT_DIR / "saved_scenes"
-        saved_dir.mkdir(exist_ok=True)
+        saved_dir = get_output_dir() / "saved_scenes"
+        try:
+            saved_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError):
+            # Fallback to /tmp if OUTPUT_DIR is read-only
+            saved_dir = Path("/tmp/outputs/saved_scenes")
+            saved_dir.mkdir(parents=True, exist_ok=True)
         
         scene_id = str(uuid.uuid4())
         timestamp = datetime.now().isoformat()
@@ -698,7 +748,7 @@ async def list_saved_scenes():
         List of saved scenes
     """
     try:
-        saved_dir = OUTPUT_DIR / "saved_scenes"
+        saved_dir = get_output_dir() / "saved_scenes"
         saved_dir.mkdir(exist_ok=True)
         
         scenes = []
@@ -752,7 +802,7 @@ async def get_saved_scene(scene_id: str):
         Scene data
     """
     try:
-        saved_dir = OUTPUT_DIR / "saved_scenes"
+        saved_dir = get_output_dir() / "saved_scenes"
         scene_file = saved_dir / f"{scene_id}.json"
         
         if not scene_file.exists():
@@ -783,7 +833,7 @@ async def delete_saved_scene(scene_id: str):
         Success message
     """
     try:
-        saved_dir = OUTPUT_DIR / "saved_scenes"
+        saved_dir = get_output_dir() / "saved_scenes"
         scene_file = saved_dir / f"{scene_id}.json"
         
         if not scene_file.exists():
@@ -820,8 +870,13 @@ async def save_storyboard(request: SaveStoryboardRequest):
     """
     try:
         # Create saved storyboards directory
-        saved_dir = OUTPUT_DIR / "saved_storyboards"
-        saved_dir.mkdir(exist_ok=True)
+        saved_dir = get_output_dir() / "saved_storyboards"
+        try:
+            saved_dir.mkdir(parents=True, exist_ok=True)
+        except (OSError, PermissionError):
+            # Fallback to /tmp if OUTPUT_DIR is read-only
+            saved_dir = Path("/tmp/outputs/saved_storyboards")
+            saved_dir.mkdir(parents=True, exist_ok=True)
         
         
         storyboard_id = str(uuid.uuid4())
@@ -862,7 +917,7 @@ async def list_saved_storyboards():
         List of saved storyboards
     """
     try:
-        saved_dir = OUTPUT_DIR / "saved_storyboards"
+        saved_dir = get_output_dir() / "saved_storyboards"
         saved_dir.mkdir(exist_ok=True)
         
         from pathlib import Path
@@ -911,7 +966,7 @@ async def get_saved_storyboard(storyboard_id: str):
         Storyboard data
     """
     try:
-        saved_dir = OUTPUT_DIR / "saved_storyboards"
+        saved_dir = get_output_dir() / "saved_storyboards"
         storyboard_file = saved_dir / f"{storyboard_id}.json"
         
         if not storyboard_file.exists():
@@ -956,7 +1011,7 @@ async def delete_saved_storyboard(storyboard_id: str):
         Success message
     """
     try:
-        saved_dir = OUTPUT_DIR / "saved_storyboards"
+        saved_dir = get_output_dir() / "saved_storyboards"
         storyboard_file = saved_dir / f"{storyboard_id}.json"
         
         if not storyboard_file.exists():

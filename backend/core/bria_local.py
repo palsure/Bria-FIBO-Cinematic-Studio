@@ -6,42 +6,65 @@ Reference: https://huggingface.co/briaai/BRIA-4B-Adapt
 import os
 from typing import Optional, Dict
 from PIL import Image
-import torch
-from huggingface_hub import hf_hub_download
 import sys
 from pathlib import Path
 
-# Try to import the BRIA pipeline
+# Try to import torch (may not be available in serverless environments)
 try:
-    # Download required files if not present
-    backend_dir = Path(__file__).parent.parent
-    local_dir = str(backend_dir)
-    
-    # Download pipeline files
+    import torch
+    TORCH_AVAILABLE = True
+except ImportError:
+    TORCH_AVAILABLE = False
+    torch = None  # Set to None so we can check availability
+
+# Try to import huggingface_hub (may not be available in serverless)
+try:
+    from huggingface_hub import hf_hub_download
+    HF_AVAILABLE = True
+except ImportError:
+    HF_AVAILABLE = False
+    hf_hub_download = None
+
+# Try to import the BRIA pipeline
+# Only attempt if torch and huggingface_hub are available
+BRIA_LOCAL_AVAILABLE = False
+BriaPipeline = None
+
+if TORCH_AVAILABLE and HF_AVAILABLE:
     try:
-        from pipeline_bria import BriaPipeline
-    except ImportError:
-        print("📥 Downloading BRIA-4B-Adapt pipeline files...")
-        hf_hub_download(
-            repo_id="briaai/BRIA-4B-Adapt",
-            filename='pipeline_bria.py',
-            local_dir=local_dir
-        )
-        hf_hub_download(
-            repo_id="briaai/BRIA-4B-Adapt",
-            filename='transformer_bria.py',
-            local_dir=local_dir
-        )
-        hf_hub_download(
-            repo_id="briaai/BRIA-4B-Adapt",
-            filename='bria_utils.py',
-            local_dir=local_dir
-        )
-        from pipeline_bria import BriaPipeline
-    
-    BRIA_LOCAL_AVAILABLE = True
-except Exception as e:
-    print(f"⚠️  BRIA Local model not available: {e}")
+        # Download required files if not present
+        backend_dir = Path(__file__).parent.parent
+        local_dir = str(backend_dir)
+        
+        # Download pipeline files
+        try:
+            from pipeline_bria import BriaPipeline
+        except ImportError:
+            print("📥 Downloading BRIA-4B-Adapt pipeline files...")
+            hf_hub_download(
+                repo_id="briaai/BRIA-4B-Adapt",
+                filename='pipeline_bria.py',
+                local_dir=local_dir
+            )
+            hf_hub_download(
+                repo_id="briaai/BRIA-4B-Adapt",
+                filename='transformer_bria.py',
+                local_dir=local_dir
+            )
+            hf_hub_download(
+                repo_id="briaai/BRIA-4B-Adapt",
+                filename='bria_utils.py',
+                local_dir=local_dir
+            )
+            from pipeline_bria import BriaPipeline
+        
+        BRIA_LOCAL_AVAILABLE = True
+    except Exception as e:
+        print(f"⚠️  BRIA Local model not available: {e}")
+        BRIA_LOCAL_AVAILABLE = False
+        BriaPipeline = None
+else:
+    # Silently disable local model if dependencies are missing
     BRIA_LOCAL_AVAILABLE = False
     BriaPipeline = None
 
@@ -60,6 +83,9 @@ class BRIALocalClient:
             raise ImportError("BRIA-4B-Adapt model not available. Install dependencies first.")
         
         # Determine device
+        if not TORCH_AVAILABLE:
+            raise ImportError("torch is not available. Install PyTorch to use local models.")
+        
         if device is None:
             self.device = "cuda" if torch.cuda.is_available() else "cpu"
         else:
