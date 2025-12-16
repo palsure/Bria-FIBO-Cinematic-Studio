@@ -1,15 +1,18 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import Notification from './Notification'
+import ConfirmModal from './ConfirmModal'
 import './SavedStoryboards.css'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Use environment variable if set, otherwise use relative path (for Vercel) or localhost (for dev)
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
 function SavedStoryboards({ onLoadStoryboard }) {
   const [savedStoryboards, setSavedStoryboards] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [notification, setNotification] = useState(null)
+  const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, storyboardId: null, storyboardName: null })
 
   useEffect(() => {
     loadSavedStoryboards()
@@ -40,19 +43,31 @@ function SavedStoryboards({ onLoadStoryboard }) {
     }
   }
 
-  const handleDeleteStoryboard = async (storyboardId, event) => {
+  const handleDeleteClick = (storyboardId, storyboardName, event) => {
     event.stopPropagation()
-    if (!confirm('Are you sure you want to delete this storyboard?')) {
-      return
-    }
+    setDeleteConfirm({
+      isOpen: true,
+      storyboardId,
+      storyboardName
+    })
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirm.storyboardId) return
 
     try {
-      await axios.delete(`${API_BASE_URL}/api/saved-storyboard/${storyboardId}`)
+      await axios.delete(`${API_BASE_URL}/api/saved-storyboard/${deleteConfirm.storyboardId}`)
       loadSavedStoryboards() // Reload list
       setNotification({ message: 'Storyboard deleted successfully!', type: 'success' })
+      setDeleteConfirm({ isOpen: false, storyboardId: null, storyboardName: null })
     } catch (err) {
       setNotification({ message: 'Failed to delete storyboard: ' + (err.response?.data?.detail || err.message), type: 'error' })
+      setDeleteConfirm({ isOpen: false, storyboardId: null, storyboardName: null })
     }
+  }
+
+  const handleCancelDelete = () => {
+    setDeleteConfirm({ isOpen: false, storyboardId: null, storyboardName: null })
   }
 
   const formatDate = (dateString) => {
@@ -114,7 +129,7 @@ function SavedStoryboards({ onLoadStoryboard }) {
               <div className="storyboard-card-header">
                 <h3>{storyboard.name || `Storyboard ${storyboard.id}`}</h3>
                 <button
-                  onClick={(e) => handleDeleteStoryboard(storyboard.id, e)}
+                  onClick={(e) => handleDeleteClick(storyboard.id, storyboard.name, e)}
                   className="delete-button"
                   title="Delete storyboard"
                 >
@@ -168,6 +183,17 @@ function SavedStoryboards({ onLoadStoryboard }) {
           onClose={() => setNotification(null)}
         />
       )}
+
+      <ConfirmModal
+        isOpen={deleteConfirm.isOpen}
+        title="Delete Storyboard"
+        message={`Are you sure you want to delete "${deleteConfirm.storyboardName || 'this storyboard'}"? This action cannot be undone.`}
+        onConfirm={handleConfirmDelete}
+        onCancel={handleCancelDelete}
+        confirmText="Delete"
+        cancelText="Cancel"
+        confirmButtonStyle="danger"
+      />
     </div>
   )
 }

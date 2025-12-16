@@ -453,7 +453,7 @@ class FIBOGenerator:
                          translator,
                          custom_params: Optional[Dict] = None) -> 'Storyboard':
         """
-        Generate storyboard from multiple scenes
+        Generate storyboard from multiple scenes with parallel processing
         
         Args:
             scenes: List of Scene objects
@@ -465,15 +465,25 @@ class FIBOGenerator:
         """
         import sys
         from pathlib import Path
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        
         backend_dir = Path(__file__).parent.parent
         if str(backend_dir) not in sys.path:
             sys.path.insert(0, str(backend_dir))
         from core.storyboard import Storyboard
         
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        def deep_merge(base, override):
+            """Deep merge two dictionaries"""
+            result = base.copy()
+            for key, value in override.items():
+                if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+                    result[key] = deep_merge(result[key], value)
+                else:
+                    result[key] = value
+            return result
 
-        # Function to process a single scene
-        def process_scene(scene):
+        # Function to process a single scene and generate parameters
+        def process_scene(scene, previous_params=None):
             try:
                 # Translate scene to FIBO JSON
                 fibo_params = translator.translate_to_json(
@@ -483,69 +493,83 @@ class FIBOGenerator:
                 
                 # Merge custom parameters if provided
                 if custom_params:
-                    # Deep merge custom params with generated params
-                    def deep_merge(base, override):
-                        result = base.copy()
-                        for key, value in override.items():
-                            if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-                                result[key] = deep_merge(result[key], value)
-                            else:
-                                result[key] = value
-                        return result
                     fibo_params = deep_merge(fibo_params, custom_params)
                 
-                # Generate frame (Consistency engine logic might need adjustment for strict frame-to-frame dependency if strict continuity is required, 
-                # but for speed we relax strictly sequential generation or we'd need to pre-generate params sequentially then render in parallel)
-                # For this implementation, we allow parallel generation. 
-                # Note: This might affect the strict frame-to-frame consistency logic if it relies on mutable state updates during generation.
-                # However, the current consistency_engine updates state *after* processing. 
-                # To be safe for speed while trying to be somewhat consistent, we can generate params first then render images in parallel.
-                
-                # OPTIMIZATION: We will generate the images in parallel.
-                # The consistency params logic is fast, the image generation is slow.
-                # So we should decouple param generation (serial) from image generation (parallel).
+                # Apply consistency engine to maintain visual continuity
+                adjusted_params = self.consistency_engine.maintain_consistency(
+                    fibo_params, previous_params
+                )
                 
                 return {
                     "scene": scene,
-                    "params": fibo_params
+                    "params": adjusted_params
                 }
             except Exception as e:
                 print(f"Error preparing scene {scene.number}: {e}")
                 return None
 
-        # Step 1: Prepare parameters (Sequential to maintain consistency context if needed, though here we do it in parallel for now as consistency engine state is per-instance)
-        # Actually, for the consistency engine to work correctly (passing previous params), strictly speaking we should generate params sequentially.
-        # But image generation is the bottleneck.
-        
-        # Let's do parameter generation sequentially to respect consistency engine
+        # Step 1: Prepare parameters sequentially to maintain consistency
+        # This ensures visual continuity across frames
         prepared_data = []
+        previous_params = None
         for scene in scenes:
-            scene_data = process_scene(scene)
+            scene_data = process_scene(scene, previous_params)
             if scene_data:
                 prepared_data.append(scene_data)
+                previous_params = scene_data["params"]
+                # Update consistency engine history
+                self.consistency_engine.frame_history.append(previous_params)
 
         # Step 2: Generate images in parallel
         # This is the slow part that we want to parallelize
         def generate_image_for_scene(data):
             try:
-                frame = self.generate_frame(
-                    data["scene"].description,
-                    data["params"],
-                    data["scene"].number
+                # Generate frame (consistency already applied in params)
+                # We need to bypass consistency checking in generate_frame since we already did it
+                image = self._generate_with_fibo(data["scene"].description, data["params"])
+                
+                # Generate HDR version if enabled
+                hdr_image = None
+                if self.hdr_enabled:
+                    hdr_image = self._generate_hdr(image, data["params"])
+                
+                frame = Frame(
+                    scene_number=data["scene"].number,
+                    image=image,
+                    params=data["params"],
+                    hdr_image=hdr_image
                 )
-                # Store scene description
+                
+                # Store scene description in frame params for later retrieval
                 frame.params['scene_description'] = data["scene"].description
                 return frame
             except Exception as e:
                 print(f"Error generating frame for scene {data['scene'].number}: {e}")
-                return None
+                # Create a placeholder frame on error
+                placeholder = Image.new('RGB', (self.image_width, self.image_height), color='#2a2a2a')
+                from PIL import ImageDraw, ImageFont
+                draw = ImageDraw.Draw(placeholder)
+                try:
+                    font = ImageFont.truetype("/System/Library/Fonts/Helvetica.ttc", 16)
+                except:
+                    font = ImageFont.load_default()
+                draw.text((10, 10), f"Error: Scene {data['scene'].number}", fill='#ff0000', font=font)
+                return Frame(
+                    scene_number=data["scene"].number,
+                    image=placeholder,
+                    params={'error': str(e), 'scene_description': data["scene"].description}
+                )
 
+        # Use parallel processing for image generation
+        # Limit concurrent requests to avoid overwhelming the API
+        max_workers = min(len(prepared_data), 5)  # Max 5 concurrent requests
         frames = [None] * len(prepared_data)
         
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            # map preserves order? No, map does, submit doesn't. 
-            # We use map to keep things simple or just submit and sort by scene number.
-            future_to_index = {executor.submit(generate_image_for_scene, data): i for i, data in enumerate(prepared_data)}
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            future_to_index = {
+                executor.submit(generate_image_for_scene, data): i 
+                for i, data in enumerate(prepared_data)
+            }
             
             for future in as_completed(future_to_index):
                 index = future_to_index[future]
@@ -553,9 +577,10 @@ class FIBOGenerator:
                     frame = future.result()
                     frames[index] = frame
                 except Exception as e:
-                    print(f"Generated generated exception: {e}")
+                    print(f"Exception generating frame: {e}")
+                    frames[index] = None
         
-        # Filter out Nones
+        # Filter out Nones and ensure frames are in correct order
         frames = [f for f in frames if f is not None]
         
         return Storyboard(frames)

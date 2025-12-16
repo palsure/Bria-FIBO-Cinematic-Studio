@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react'
 import axios from 'axios'
-import ParameterCustomization from './ParameterCustomization'
 import StoryboardViewer from './StoryboardViewer'
 import './CreateStoryboard.css'
 
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+// Use environment variable if set, otherwise use relative path (for Vercel) or localhost (for dev)
+const API_BASE_URL = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
 // Sample script for pre-population
 const SAMPLE_SCRIPT = `FADE IN:
@@ -38,22 +38,45 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [parsedScenes, setParsedScenes] = useState(null)
+  const [isSavedStoryboard, setIsSavedStoryboard] = useState(false)
 
   // Handle loaded storyboard from parent
+  // IMPORTANT: Only treat as "loaded" if it has an 'id' or 'storyboard_id' (indicating it was saved)
   useEffect(() => {
-    if (loadedStoryboard && loadedStoryboard.frames) {
-      setStoryboard(loadedStoryboard)
-      setCurrentStep(2) // Move to generation step
-      // If script content is available in loaded storyboard, set it
-      if (loadedStoryboard.script_content) {
-        setScriptContent(loadedStoryboard.script_content)
+    // Only process if loadedStoryboard is explicitly provided AND has an id (saved storyboard)
+    if (loadedStoryboard && loadedStoryboard.frames && Array.isArray(loadedStoryboard.frames) && loadedStoryboard.frames.length > 0) {
+      // Check if this is a saved storyboard (has id) vs a newly generated one
+      const isSaved = !!(loadedStoryboard.id || loadedStoryboard.storyboard_id || loadedStoryboard.name)
+      
+      if (isSaved) {
+        console.log('CreateStoryboard: Loading saved storyboard (has id/name), setting isSavedStoryboard=true', loadedStoryboard)
+        setStoryboard(loadedStoryboard)
+        setIsSavedStoryboard(true)
+        setCurrentStep(2) // Move to generation step
+        // If script content is available in loaded storyboard, set it
+        if (loadedStoryboard.script_content) {
+          setScriptContent(loadedStoryboard.script_content)
+        }
+      } else {
+        // This is a newly generated storyboard, not a saved one
+        console.log('CreateStoryboard: Newly generated storyboard (no id), setting isSavedStoryboard=false', loadedStoryboard)
+        setStoryboard(loadedStoryboard)
+        setIsSavedStoryboard(false)
+        setCurrentStep(2) // Move to generation step
+      }
+    } else {
+      // Explicitly set to false when no loaded storyboard OR when loadedStoryboard is cleared
+      // Only log if we're actually clearing (not on initial mount)
+      if (loadedStoryboard === null || loadedStoryboard === undefined) {
+        console.log('CreateStoryboard: No loaded storyboard, ensuring isSavedStoryboard=false')
+        setIsSavedStoryboard(false)
       }
     }
   }, [loadedStoryboard])
 
   const steps = [
-    { number: 1, title: 'Scripting', icon: '📝' },
-    { number: 2, title: 'Scene Generation and Editing', icon: '🎬' }
+    { number: 1, title: 'StoryBoard-Scripting', icon: '📝' },
+    { number: 2, title: 'StoryBoard-Generation and Editing', icon: '🎬' }
   ]
 
   const handleFileUpload = async (event) => {
@@ -118,6 +141,8 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
     try {
       setLoading(true)
       setError(null)
+      console.log('CreateStoryboard: Auto-generating storyboard, setting isSavedStoryboard=false')
+      setIsSavedStoryboard(false) // Ensure it's not marked as saved for new generation
       
       const payload = {
         script_content: scriptContent,
@@ -131,10 +156,16 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
       
       const response = await axios.post(`${API_BASE_URL}/api/generate-storyboard`, payload)
 
-      setStoryboard(response.data)
-      if (onStoryboardGenerated) {
-        onStoryboardGenerated(response.data)
-      }
+      console.log('CreateStoryboard: Storyboard generated, explicitly setting isSavedStoryboard=false')
+      // CRITICAL: Set to false BEFORE setting storyboard to prevent useEffect from interfering
+      setIsSavedStoryboard(false)
+      // Use setTimeout to ensure state update happens before storyboard is set
+      setTimeout(() => {
+        setStoryboard(response.data)
+        if (onStoryboardGenerated) {
+          onStoryboardGenerated(response.data)
+        }
+      }, 0)
     } catch (error) {
       setError(error.response?.data?.detail || error.message)
     } finally {
@@ -154,6 +185,8 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
     try {
       setLoading(true)
       setError(null)
+      console.log('CreateStoryboard: Generating storyboard, setting isSavedStoryboard=false')
+      setIsSavedStoryboard(false) // Ensure it's not marked as saved for new generation
       
       const payload = {
         script_content: scriptContent,
@@ -167,10 +200,21 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
       
       const response = await axios.post(`${API_BASE_URL}/api/generate-storyboard`, payload)
 
-      setStoryboard(response.data)
+      console.log('CreateStoryboard: Storyboard generated (manual), explicitly setting isSavedStoryboard=false')
+      console.log('CreateStoryboard: Response data:', response.data)
+      // CRITICAL: Set to false and clear any loaded storyboard reference
+      // Also ensure the response data doesn't have id/name that would make it look saved
+      const storyboardData = { ...response.data }
+      // Remove any id/name fields that might make it look like a saved storyboard
+      delete storyboardData.id
+      delete storyboardData.storyboard_id
+      delete storyboardData.name
+      
+      setIsSavedStoryboard(false)
+      setStoryboard(storyboardData)
       // Stay on step 2 to show generated storyboard
       if (onStoryboardGenerated) {
-        onStoryboardGenerated(response.data)
+        onStoryboardGenerated(storyboardData)
       }
     } catch (error) {
       setError(error.response?.data?.detail || error.message)
@@ -185,14 +229,26 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
   const handleExportPDF = async () => {
     try {
       setLoading(true)
+      
+      // Use existing frames if available (fast path), otherwise fallback to script
+      const payload = storyboard && storyboard.frames && storyboard.frames.length > 0
+        ? {
+            frames: storyboard.frames.map(frame => ({
+              scene_number: frame.scene_number,
+              image: frame.image, // Already base64 encoded
+              params: frame.params
+            }))
+          }
+        : {
+            script_content: scriptContent,
+            llm_provider: llmProvider,
+            hdr_enabled: hdrEnabled,
+            custom_params: customParams,
+          }
+      
       const response = await axios.post(
         `${API_BASE_URL}/api/export-pdf`,
-        {
-          script_content: scriptContent,
-          llm_provider: llmProvider,
-          hdr_enabled: hdrEnabled,
-          custom_params: customParams,
-        },
+        payload,
         {
           responseType: 'blob',
         }
@@ -257,6 +313,7 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
   const handleReset = () => {
     setCurrentStep(1)
     setStoryboard(null)
+    setIsSavedStoryboard(false)
     setParsedScenes(null)
     setCustomParams(null)
     setError(null)
@@ -290,14 +347,8 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
           </div>
         )}
 
-        {loading && (
-          <div className="loading-overlay">
-            <div className="spinner"></div>
-            <p>Processing...</p>
-          </div>
-        )}
 
-        {/* Step 1: Script */}
+        {/* Step 1: StoryBoard-Scripting */}
         {currentStep === 1 && (
           <div className="step-panel">
             <div className="description-with-upload">
@@ -330,13 +381,13 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
 
             <div className="step-actions">
               <button onClick={handleScriptSubmit} className="next-button" disabled={loading || !scriptContent.trim()}>
-                Next: Scene Generation and Editing →
+                Next: StoryBoard-Generation and Editing →
               </button>
             </div>
           </div>
         )}
 
-        {/* Step 2: Scene Generation and Editing */}
+        {/* Step 2: StoryBoard-Generation and Editing */}
         {currentStep === 2 && (
           <div className="step-panel">
             {loading && !storyboard ? (
@@ -346,27 +397,6 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
               </div>
             ) : storyboard ? (
               <>
-                <p className="step-description">Review and edit your generated scenes. Adjust camera, lighting, and color parameters to fine-tune individual scenes.</p>
-
-                <div className="editing-options">
-                  <div className="hdr-option">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={hdrEnabled}
-                        onChange={(e) => setHdrEnabled(e.target.checked)}
-                      />
-                      Enable HDR/16-bit
-                    </label>
-                  </div>
-                </div>
-
-                <ParameterCustomization
-                  params={customParams}
-                  onChange={setCustomParams}
-                  onReset={() => setCustomParams(null)}
-                />
-
                 <StoryboardViewer 
                   storyboard={storyboard}
                   parsedScenes={parsedScenes}
@@ -382,22 +412,25 @@ function CreateStoryboard({ loadedStoryboard, onStoryboardGenerated, onError, on
                       onStoryboardGenerated(updatedStoryboard)
                     }
                   }}
+                  isSavedStoryboard={isSavedStoryboard}
                 />
+                {/* Debug: Show current state */}
+                {process.env.NODE_ENV === 'development' && (
+                  <div style={{ padding: '10px', background: '#2a2a2a', marginTop: '10px', fontSize: '12px', color: '#888' }}>
+                    Debug: isSavedStoryboard={String(isSavedStoryboard)}
+                  </div>
+                )}
 
                 <div className="step-actions">
                   <button onClick={handlePrevious} className="previous-button">
-                    ← Back to Scripting
+                    ← Back to StoryBoard-Scripting
                   </button>
                   <button onClick={handleReset} className="reset-button">
                     🔄 Create New Storyboard
                   </button>
                 </div>
               </>
-            ) : (
-              <div className="generate-prompt">
-                <p>Processing script...</p>
-              </div>
-            )}
+            ) : null}
           </div>
         )}
       </div>
