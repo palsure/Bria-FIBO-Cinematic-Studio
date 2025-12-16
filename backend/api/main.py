@@ -6,7 +6,7 @@ from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 import uuid
 import json
 from datetime import datetime
@@ -112,6 +112,19 @@ class GenerateRequest(BaseModel):
     llm_provider: Optional[str] = "bria"  # Default to BRIA/FIBO
     hdr_enabled: Optional[bool] = True
     custom_params: Optional[Dict] = None  # Custom FIBO parameters
+
+
+class ExportPDFRequest(BaseModel):
+    """Request model for exporting PDF - can use existing frames or regenerate"""
+    frames: Optional[List[Any]] = None  # Use existing frames if provided (faster) - accepts any format
+    script_content: Optional[str] = None  # Fallback to regeneration if frames not provided
+    llm_provider: Optional[str] = None
+    hdr_enabled: Optional[bool] = None
+    custom_params: Optional[Dict[str, Any]] = None
+    
+    class Config:
+        # Allow extra fields to be more flexible
+        extra = "allow"
 
 
 class EditFrameRequest(BaseModel):
@@ -253,27 +266,92 @@ async def generate_storyboard(request: GenerateRequest):
 
 
 @app.post("/api/export-pdf")
-async def export_pdf(request: GenerateRequest):
+async def export_pdf(request: ExportPDFRequest):
     """
-    Generate storyboard and export as PDF
+    Export storyboard as PDF - uses existing frames if provided (fast), otherwise regenerates
     
     Args:
-        request: Generation request
+        request: Export request with frames or script content
         
     Returns:
         PDF file download
     """
     try:
-        # Generate storyboard
-        scenes = script_processor.parse_script_content(request.script_content)
-        translator = LLMTranslator(provider=request.llm_provider)
-        generator = get_fibo_generator()
+        from PIL import Image
+        from io import BytesIO
+        import base64
+        from core.fibo_engine import Frame
+        from core.storyboard import Storyboard
         
-        # Generate storyboard with custom parameters if provided
-        if request.custom_params:
-            storyboard = generator.create_storyboard(scenes, translator, custom_params=request.custom_params)
+        # Extract values from request
+        frames = request.frames if hasattr(request, 'frames') else None
+        script_content = request.script_content if hasattr(request, 'script_content') else None
+        llm_provider = request.llm_provider if hasattr(request, 'llm_provider') else "bria"
+        hdr_enabled = request.hdr_enabled if hasattr(request, 'hdr_enabled') else True
+        custom_params = request.custom_params if hasattr(request, 'custom_params') else None
+        
+        # Validate that either frames or script_content is provided
+        if not frames and not script_content:
+            raise HTTPException(status_code=400, detail="Either 'frames' or 'script_content' must be provided")
+        
+        # If frames are provided, use them directly (fast path)
+        if frames and len(frames) > 0:
+            # Convert frame dictionaries to Frame objects
+            frame_objects = []
+            for frame_data in frames:
+                # Handle both dict and object formats
+                if isinstance(frame_data, dict):
+                    image_data = frame_data.get("image", "")
+                    scene_number = frame_data.get("scene_number", 0)
+                    params = frame_data.get("params", {})
+                else:
+                    # If it's a FrameResponse object, convert to dict
+                    image_data = frame_data.image if hasattr(frame_data, 'image') else ""
+                    scene_number = frame_data.scene_number if hasattr(frame_data, 'scene_number') else 0
+                    params = frame_data.params if hasattr(frame_data, 'params') else {}
+                
+                if not image_data:
+                    continue
+                
+                # Remove data URL prefix if present
+                if isinstance(image_data, str) and image_data.startswith("data:image"):
+                    image_data = image_data.split(",")[1]
+                
+                try:
+                    # Decode base64 to PIL Image
+                    img_bytes = base64.b64decode(image_data)
+                    img = Image.open(BytesIO(img_bytes))
+                    
+                    # Create Frame object
+                    frame = Frame(
+                        scene_number=scene_number,
+                        image=img,
+                        params=params if params else {}
+                    )
+                    frame_objects.append(frame)
+                except Exception as e:
+                    print(f"Error processing frame {scene_number}: {e}")
+                    continue
+            
+            if not frame_objects:
+                raise HTTPException(status_code=400, detail="No valid frames could be processed")
+            
+            # Create storyboard from existing frames
+            storyboard = Storyboard(frame_objects)
         else:
-            storyboard = generator.create_storyboard(scenes, translator)
+            # Fallback: Generate storyboard from script (slower)
+            if not script_content:
+                raise HTTPException(status_code=400, detail="Either frames or script_content must be provided")
+            
+            scenes = script_processor.parse_script_content(script_content)
+            translator = LLMTranslator(provider=llm_provider or "bria")
+            generator = get_fibo_generator()
+            
+            # Generate storyboard with custom parameters if provided
+            if custom_params:
+                storyboard = generator.create_storyboard(scenes, translator, custom_params=custom_params)
+            else:
+                storyboard = generator.create_storyboard(scenes, translator)
         
         # Export PDF
         pdf_path = OUTPUT_DIR / "storyboard.pdf"
@@ -293,6 +371,9 @@ async def export_pdf(request: GenerateRequest):
         )
     except HTTPException:
         raise
+    except ValueError as e:
+        # Pydantic validation errors
+        raise HTTPException(status_code=422, detail=f"Validation error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"PDF export error: {str(e)}")
 
@@ -558,6 +639,7 @@ class SaveSceneRequest(BaseModel):
     image: str  # base64 encoded
     params: Dict
     description: Optional[str] = None
+    name: Optional[str] = None
     timestamp: Optional[str] = None
 
 
@@ -585,6 +667,7 @@ async def save_scene(request: SaveSceneRequest):
             "scene_number": request.scene_number,
             "params": request.params,
             "description": request.description or request.params.get("scene_description", ""),
+            "name": request.name or f"Scene {request.scene_number}",
             "timestamp": request.timestamp or timestamp,
             "image": request.image
         }
@@ -623,9 +706,17 @@ async def list_saved_scenes():
             try:
                 with open(file_path, 'r') as f:
                     scene_data = json.load(f)
+                    scene_name = scene_data.get("name")
+                    # Ensure name is a string or None (not empty string)
+                    if scene_name and isinstance(scene_name, str) and scene_name.strip():
+                        scene_name = scene_name.strip()
+                    else:
+                        scene_name = None
+                    
                     scenes.append({
                         "id": scene_data.get("id", file_path.stem),
                         "scene_number": scene_data.get("scene_number", 0),
+                        "name": scene_name,
                         "description": scene_data.get("description", ""),
                         "params": scene_data.get("params", {}),
                         "timestamp": scene_data.get("timestamp"),
@@ -827,8 +918,8 @@ async def get_saved_storyboard(storyboard_id: str):
         with open(storyboard_file, 'r') as f:
             storyboard_data = json.load(f)
         
-        # Convert to StoryboardResponse format
-        return StoryboardResponse(
+        # Convert to StoryboardResponse format with name and id
+        response_data = StoryboardResponse(
             frames=[
                 FrameResponse(
                     scene_number=frame.get("scene_number", i + 1),
@@ -840,6 +931,11 @@ async def get_saved_storyboard(storyboard_id: str):
             frame_count=storyboard_data.get("frame_count", 0),
             script_content=storyboard_data.get("script_content")
         )
+        # Add name and id to response
+        response_dict = response_data.dict()
+        response_dict["name"] = storyboard_data.get("name", "Unnamed Storyboard")
+        response_dict["id"] = storyboard_data.get("id", storyboard_id)
+        return response_dict
     except HTTPException:
         raise
     except Exception as e:

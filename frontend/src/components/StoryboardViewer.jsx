@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useState, useEffect } from 'react'
 import axios from 'axios'
 import ParameterCustomization from './ParameterCustomization'
 import Notification from './Notification'
@@ -6,7 +6,7 @@ import './StoryboardViewer.css'
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
-function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExportPDF, onExportAnimatic, exportLoading, onStoryboardUpdate }) {
+function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExportPDF, onExportAnimatic, exportLoading, onStoryboardUpdate, isSavedStoryboard = false }) {
   const [saving, setSaving] = useState({})
   const [saved, setSaved] = useState({})
   const [savingStoryboard, setSavingStoryboard] = useState(false)
@@ -18,10 +18,44 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
   const [editingParams, setEditingParams] = useState(null)
   const [regenerating, setRegenerating] = useState({})
   const [notification, setNotification] = useState(null)
+  const [savingSceneModal, setSavingSceneModal] = useState({ isOpen: false, frameIndex: null, frame: null, sceneName: '' })
+
+  // Initialize saved storyboard info if it's a saved storyboard
+  useEffect(() => {
+    console.log('StoryboardViewer useEffect: isSavedStoryboard=', isSavedStoryboard, 'storyboard exists?', !!storyboard)
+    if (isSavedStoryboard === true && storyboard) {
+      console.log('StoryboardViewer: Setting saved storyboard info')
+      // Check if storyboard has name and id from saved data
+      if (storyboard.name) {
+        setSavedStoryboardName(storyboard.name)
+      }
+      if (storyboard.id || storyboard.storyboard_id) {
+        setSavedStoryboardId(storyboard.id || storyboard.storyboard_id)
+      }
+    } else {
+      // Clear saved name when it's a new storyboard (or undefined/false)
+      console.log('StoryboardViewer: Clearing saved storyboard info (new storyboard)')
+      setSavedStoryboardName(null)
+      setSavedStoryboardId(null)
+      setEditingStoryboardName(false)
+    }
+  }, [isSavedStoryboard, storyboard])
 
   if (!storyboard || !storyboard.frames) {
     return null
   }
+
+  // Debug logging - ALWAYS log to help debug
+  console.log('=== StoryboardViewer RENDER DEBUG ===')
+  console.log('isSavedStoryboard:', isSavedStoryboard, 'type:', typeof isSavedStoryboard, '=== true?', isSavedStoryboard === true)
+  console.log('savedStoryboardName:', savedStoryboardName)
+  console.log('editingStoryboardName:', editingStoryboardName)
+  console.log('storyboardName:', storyboardName)
+  console.log('Will show save controls?', isSavedStoryboard !== true)
+  console.log('Will show saved name?', isSavedStoryboard === true && savedStoryboardName)
+  console.log('Condition check: isSavedStoryboard === true?', isSavedStoryboard === true)
+  console.log('Will render save button in else branch?', isSavedStoryboard !== true)
+  console.log('=====================================')
 
   // Helper function to get scene description
   const getSceneDescription = (sceneNumber) => {
@@ -34,9 +68,26 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
     return frame?.params?.scene_description || null
   }
 
-  const handleSaveScene = async (frame, index) => {
+  const handleSaveSceneClick = (frame, index) => {
+    // Open modal to get scene name
+    setSavingSceneModal({
+      isOpen: true,
+      frameIndex: index,
+      frame: frame,
+      sceneName: ''
+    })
+  }
+
+  const handleConfirmSaveScene = async () => {
+    if (!savingSceneModal.frame || !savingSceneModal.sceneName.trim()) {
+      setNotification({ message: 'Please enter a scene name', type: 'warning' })
+      return
+    }
+
+    const { frame, frameIndex, sceneName } = savingSceneModal
+
     try {
-      setSaving({ ...saving, [index]: true })
+      setSaving({ ...saving, [frameIndex]: true })
       
       const sceneDescription = getSceneDescription(frame.scene_number)
       
@@ -44,21 +95,27 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
         scene_number: frame.scene_number,
         image: frame.image,
         params: frame.params,
-        description: sceneDescription,
+        description: sceneDescription || sceneName.trim(),
+        name: sceneName.trim(),
         timestamp: new Date().toISOString()
       })
 
-      setSaved({ ...saved, [index]: true })
+      setSaved({ ...saved, [frameIndex]: true })
       setTimeout(() => {
-        setSaved({ ...saved, [index]: false })
+        setSaved({ ...saved, [frameIndex]: false })
       }, 3000)
       setNotification({ message: 'Scene saved successfully!', type: 'success' })
+      setSavingSceneModal({ isOpen: false, frameIndex: null, frame: null, sceneName: '' })
     } catch (error) {
       console.error('Failed to save scene:', error)
       setNotification({ message: 'Failed to save scene: ' + (error.response?.data?.detail || error.message), type: 'error' })
     } finally {
-      setSaving({ ...saving, [index]: false })
+      setSaving({ ...saving, [frameIndex]: false })
     }
+  }
+
+  const handleCancelSaveScene = () => {
+    setSavingSceneModal({ isOpen: false, frameIndex: null, frame: null, sceneName: '' })
   }
 
   const handleDownloadImage = (frame, index) => {
@@ -186,34 +243,48 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
   return (
     <div className="storyboard-viewer">
       <div className="storyboard-header">
-        <h2>Storyboard ({storyboard.frame_count} frames)</h2>
+        <p className="storyboard-success-message">
+          StoryBoard successfully generated with {storyboard.frame_count} {storyboard.frame_count === 1 ? 'scene' : 'scenes'}. Review and edit your generated scenes.
+        </p>
         <div className="storyboard-actions-header">
-          {savedStoryboardName && !editingStoryboardName ? (
-            <div className="saved-storyboard-info">
-              <span className="saved-name-label">Saved as:</span>
-              <span className="saved-name-value">{savedStoryboardName}</span>
-              <button
-                onClick={handleEditStoryboardName}
-                className="edit-name-button"
-                title="Edit storyboard name"
-              >
-                ✏️ Edit
-              </button>
-            </div>
+          {/* ALWAYS show save controls unless explicitly a saved storyboard */}
+          {isSavedStoryboard === true ? (
+            // Show saved name for loaded saved storyboards ONLY
+            savedStoryboardName && (
+              <div className="saved-storyboard-info">
+                <span className="saved-name-label">Saved as:</span>
+                <span className="saved-name-value">{savedStoryboardName}</span>
+              </div>
+            )
           ) : (
-            <div className="save-storyboard-controls">
-              <input
-                type="text"
-                placeholder="Storyboard name..."
-                value={storyboardName}
-                onChange={(e) => setStoryboardName(e.target.value)}
-                className="storyboard-name-input"
-              />
-              {editingStoryboardName ? (
-                <>
+            // For ALL other cases (new storyboards, undefined, false), show save/edit controls
+            <>
+              {/* If already saved (but not loaded from saved), show saved name with edit */}
+              {savedStoryboardName && !editingStoryboardName ? (
+                <div className="saved-storyboard-info">
+                  <span className="saved-name-label">Saved as:</span>
+                  <span className="saved-name-value">{savedStoryboardName}</span>
+                  <button
+                    onClick={handleEditStoryboardName}
+                    className="edit-name-button"
+                    title="Edit storyboard name"
+                  >
+                    ✏️ Edit
+                  </button>
+                </div>
+              ) : editingStoryboardName ? (
+                // Show edit controls when editing name
+                <div className="save-storyboard-controls">
+                  <input
+                    type="text"
+                    placeholder="Storyboard name..."
+                    value={storyboardName}
+                    onChange={(e) => setStoryboardName(e.target.value)}
+                    className="storyboard-name-input"
+                  />
                   <button
                     onClick={handleUpdateStoryboardName}
-                    disabled={savingStoryboard}
+                    disabled={savingStoryboard || !storyboardName.trim()}
                     className="save-storyboard-button"
                   >
                     {savingStoryboard ? '⏳ Saving...' : '💾 Update'}
@@ -224,23 +295,35 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
                   >
                     Cancel
                   </button>
-                </>
+                </div>
               ) : (
-                <button
-                  onClick={handleSaveStoryboard}
-                  disabled={savingStoryboard}
-                  className="save-storyboard-button"
-                >
-                  {savingStoryboard ? '⏳ Saving...' : '💾 Save Storyboard'}
-                </button>
+                // DEFAULT: Show save controls for new/unsaved storyboards
+                // This should ALWAYS render for new storyboards
+                <div className="save-storyboard-controls" data-testid="save-storyboard-controls" style={{ display: 'flex', visibility: 'visible' }}>
+                  <input
+                    type="text"
+                    placeholder="Storyboard name..."
+                    value={storyboardName}
+                    onChange={(e) => setStoryboardName(e.target.value)}
+                    className="storyboard-name-input"
+                    style={{ display: 'block', visibility: 'visible' }}
+                  />
+                  <button
+                    onClick={handleSaveStoryboard}
+                    disabled={savingStoryboard || !storyboardName.trim()}
+                    className="save-storyboard-button"
+                    data-testid="save-storyboard-button"
+                    style={{ display: 'block', visibility: 'visible', opacity: (!storyboardName.trim() ? 0.6 : 1) }}
+                  >
+                    {savingStoryboard ? '⏳ Saving...' : '💾 Save Storyboard'}
+                  </button>
+                </div>
               )}
-            </div>
+            </>
           )}
-        </div>
-        
-        {(onExportPDF || onExportAnimatic) && (
-          <div className="export-section">
-            <div className="export-buttons-container">
+          
+          {(onExportPDF || onExportAnimatic) && (
+            <div className="export-buttons-inline">
               {onExportPDF && (
                 <button onClick={onExportPDF} className="export-pdf-button" disabled={exportLoading}>
                   <span className="export-icon">📄</span>
@@ -254,8 +337,8 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
                 </button>
               )}
             </div>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       
       <div className="frames-grid">
@@ -263,16 +346,6 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
           const sceneDescription = getSceneDescription(frame.scene_number)
           return (
           <div key={index} className="frame-card">
-            <div className="frame-header">
-              <span className="scene-number">Scene {frame.scene_number}</span>
-            </div>
-            
-            {sceneDescription && (
-              <div className="scene-description">
-                <p>{sceneDescription}</p>
-              </div>
-            )}
-            
             <div className="frame-image">
               <img
                 src={frame.image}
@@ -281,27 +354,40 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
               />
             </div>
             
-            <div className="frame-params">
-              <div className="param-group-inline">
-                <div className="param-item-inline">
+            <div className="frame-card-content">
+              <div className="frame-header">
+                <span className="scene-number">Scene {frame.scene_number}</span>
+              </div>
+              
+              {sceneDescription && (
+                <div className="scene-description">
+                  <p>{sceneDescription}</p>
+                </div>
+              )}
+              
+              <div className="frame-params">
+                <div className="param-labels-row">
                   <strong>Camera:</strong>
-                  <span>Angle: {frame.params.camera?.angle || 'N/A'}</span>
-                  <span>FOV: {frame.params.camera?.fov || 'N/A'}°</span>
-                </div>
-                <div className="param-item-inline">
                   <strong>Lighting:</strong>
-                  <span>Time: {frame.params.lighting?.time_of_day || 'N/A'}</span>
-                  <span>Style: {frame.params.lighting?.style || 'N/A'}</span>
-                </div>
-                <div className="param-item-inline">
                   <strong>Color:</strong>
-                  <span>Palette: {frame.params.color?.palette || 'N/A'}</span>
-                  <span>Saturation: {frame.params.color?.saturation?.toFixed(2) || 'N/A'}</span>
+                </div>
+                <div className="param-group-inline">
+                  <div className="param-item-inline">
+                    <span>Angle: {frame.params.camera?.angle || 'N/A'}</span>
+                    <span>FOV: {frame.params.camera?.fov || 'N/A'}°</span>
+                  </div>
+                  <div className="param-item-inline">
+                    <span>Time: {frame.params.lighting?.time_of_day || 'N/A'}</span>
+                    <span>Style: {frame.params.lighting?.style || 'N/A'}</span>
+                  </div>
+                  <div className="param-item-inline">
+                    <span>Palette: {frame.params.color?.palette || 'N/A'}</span>
+                    <span>Saturation: {frame.params.color?.saturation?.toFixed(2) || 'N/A'}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="frame-actions">
+              <div className="frame-actions">
               <button
                 onClick={() => {
                   setEditingFrame(index)
@@ -313,7 +399,7 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
                 ✏️ Edit Scene
               </button>
               <button
-                onClick={() => handleSaveScene(frame, index)}
+                onClick={() => handleSaveSceneClick(frame, index)}
                 disabled={saving[index]}
                 className={`save-button ${saved[index] ? 'saved' : ''}`}
                 title="Save scene to library"
@@ -327,6 +413,7 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
               >
                 ⬇️ Download
               </button>
+              </div>
             </div>
           </div>
           )
@@ -343,26 +430,101 @@ function StoryboardViewer({ storyboard, parsedScenes, onSaveStoryboard, onExport
             </div>
             
             <div className="edit-scene-body">
-              <p className="edit-description">Customize camera, lighting, color, and composition parameters for this scene.</p>
-              
-              <ParameterCustomization
-                params={editingParams || storyboard.frames[editingFrame]?.params}
-                onChange={setEditingParams}
-                onReset={() => setEditingParams(storyboard.frames[editingFrame]?.params)}
-              />
+              <div className="edit-scene-layout">
+                {/* Image Preview on Left */}
+                <div className="edit-scene-image-preview">
+                  <div className="preview-image-container">
+                    <img
+                      src={storyboard.frames[editingFrame]?.image}
+                      alt={`Scene ${storyboard.frames[editingFrame]?.scene_number}`}
+                    />
+                    {regenerating[editingFrame] && (
+                      <div className="preview-loading-overlay">
+                        <div className="preview-spinner"></div>
+                        <p>Regenerating scene...</p>
+                      </div>
+                    )}
+                  </div>
+                  {getSceneDescription(storyboard.frames[editingFrame]?.scene_number) && (
+                    <div className="preview-description">
+                      <p>{getSceneDescription(storyboard.frames[editingFrame]?.scene_number)}</p>
+                    </div>
+                  )}
+                </div>
 
-              <div className="edit-scene-actions">
-                <button onClick={handleCancelEdit} className="cancel-button">
-                  Cancel
-                </button>
-                <button 
-                  onClick={() => handleRegenerateScene(editingFrame, editingParams || storyboard.frames[editingFrame]?.params)}
-                  disabled={regenerating[editingFrame]}
-                  className="apply-button"
-                >
-                  {regenerating[editingFrame] ? '⏳ Regenerating...' : '✨ Apply Changes'}
-                </button>
+                {/* Options on Right */}
+                <div className="edit-scene-options">
+                  <p className="edit-description">Customize camera, lighting, color, and composition parameters for this scene.</p>
+                  
+                  <div className="edit-options-container">
+                    <ParameterCustomization
+                      params={editingParams || storyboard.frames[editingFrame]?.params}
+                      onChange={setEditingParams}
+                      onReset={() => setEditingParams(storyboard.frames[editingFrame]?.params)}
+                    />
+                  </div>
+
+                  <div className="edit-scene-actions">
+                    <button onClick={handleCancelEdit} className="cancel-button">
+                      Cancel
+                    </button>
+                    <button 
+                      onClick={() => handleRegenerateScene(editingFrame, editingParams || storyboard.frames[editingFrame]?.params)}
+                      disabled={regenerating[editingFrame]}
+                      className="apply-button"
+                    >
+                      {regenerating[editingFrame] ? '⏳ Regenerating...' : '✨ Apply Changes'}
+                    </button>
+                  </div>
+                </div>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Save Scene Modal */}
+      {savingSceneModal.isOpen && (
+        <div className="save-scene-modal-overlay" onClick={handleCancelSaveScene}>
+          <div className="save-scene-modal-content" onClick={(e) => e.stopPropagation()}>
+            <div className="save-scene-modal-header">
+              <h3>Save Scene {savingSceneModal.frame?.scene_number}</h3>
+              <button onClick={handleCancelSaveScene} className="close-save-scene-button">×</button>
+            </div>
+            <div className="save-scene-modal-body">
+              <p className="save-scene-modal-description">
+                {getSceneDescription(savingSceneModal.frame?.scene_number) || 'Enter a name for this scene'}
+              </p>
+              <input
+                type="text"
+                placeholder="Scene name..."
+                value={savingSceneModal.sceneName}
+                onChange={(e) => setSavingSceneModal({ ...savingSceneModal, sceneName: e.target.value })}
+                className="save-scene-name-input"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && savingSceneModal.sceneName.trim()) {
+                    handleConfirmSaveScene()
+                  } else if (e.key === 'Escape') {
+                    handleCancelSaveScene()
+                  }
+                }}
+              />
+            </div>
+            <div className="save-scene-modal-actions">
+              <button
+                onClick={handleCancelSaveScene}
+                className="save-scene-cancel-button"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleConfirmSaveScene}
+                disabled={!savingSceneModal.sceneName.trim() || saving[savingSceneModal.frameIndex]}
+                className="save-scene-confirm-button"
+              >
+                {saving[savingSceneModal.frameIndex] ? '⏳ Saving...' : '💾 Save Scene'}
+              </button>
             </div>
           </div>
         </div>

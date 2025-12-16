@@ -240,12 +240,12 @@ function ParameterCustomization({ params, onChange, onReset }) {
             <div className="param-grid">
               <div className="param-item">
                 <label>
+                  Rule of Thirds
                   <input
                     type="checkbox"
                     checked={localParams.composition.rule_of_thirds}
                     onChange={(e) => updateParam('composition', 'rule_of_thirds', e.target.checked)}
                   />
-                  Rule of Thirds
                 </label>
               </div>
 
